@@ -37,6 +37,7 @@ import (
 	"github.com/uber/cadence/common/config"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/service/worker/diagnostics/invariant"
 )
 
 type DiagnosticsWorkflow interface {
@@ -52,6 +53,7 @@ type dw struct {
 	tallyScope    tally.Scope
 	worker        worker.Worker
 	kafkaCfg      config.KafkaConfig
+	invariants    []invariant.Invariant
 }
 
 type Params struct {
@@ -61,6 +63,7 @@ type Params struct {
 	Logger        log.Logger
 	TallyScope    tally.Scope
 	KafkaCfg      config.KafkaConfig
+	Invariants    []invariant.Invariant
 }
 
 // New creates a new diagnostics workflow.
@@ -72,6 +75,7 @@ func New(params Params) DiagnosticsWorkflow {
 		clientBean:    params.ClientBean,
 		logger:        params.Logger,
 		kafkaCfg:      params.KafkaCfg,
+		invariants:    params.Invariants,
 	}
 }
 
