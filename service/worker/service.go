@@ -221,7 +221,7 @@ func (s *Service) Start() {
 	s.startFixerWorkflowWorker()
 	if s.config.IndexerCfg != nil {
 		if shouldStartMigrationIndexer(s.params) {
-			s.startMigrationIndexer()
+			s.startMigrationDualIndexer()
 		} else {
 			s.startIndexer()
 		}
@@ -386,6 +386,7 @@ func (s *Service) startIndexer() {
 		s.GetMessagingClient(),
 		s.params.ESClient,
 		s.params.ESConfig.Indices[common.VisibilityAppName],
+		s.params.ESConfig.ConsumerName,
 		s.GetLogger(),
 		s.GetMetricsClient(),
 	)
@@ -395,18 +396,21 @@ func (s *Service) startIndexer() {
 	}
 }
 
-func (s *Service) startMigrationIndexer() {
-	visibilityIndexer := indexer.NewMigrationIndexer(
+func (s *Service) startMigrationDualIndexer() {
+	visibilityDualIndexer := indexer.NewMigrationDualIndexer(
 		s.config.IndexerCfg,
 		s.GetMessagingClient(),
 		s.params.ESClient,
 		s.params.OSClient,
 		s.params.ESConfig.Indices[common.VisibilityAppName],
+		s.params.OSConfig.Indices[common.VisibilityAppName],
+		s.params.ESConfig.ConsumerName,
+		s.params.OSConfig.ConsumerName,
 		s.GetLogger(),
 		s.GetMetricsClient(),
 	)
-	if err := visibilityIndexer.Start(); err != nil {
-		visibilityIndexer.Stop()
+	if err := visibilityDualIndexer.Start(); err != nil {
+		// not need to call visibilityDualIndexer.Stop() since it has been called inside Start()
 		s.GetLogger().Fatal("fail to start indexer", tag.Error(err))
 	}
 }
