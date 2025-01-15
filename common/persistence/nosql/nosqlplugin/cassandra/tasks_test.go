@@ -922,23 +922,25 @@ func TestSelectTasks(t *testing.T) {
 						"task_id": int64(1),
 						"task": map[string]interface{}{
 							"domain_id":        &fakeUUID{uuid: "domain1"},
-							"wofklow_id":       "wid1",
+							"workflow_id":      "wid1",
 							"schedule_id":      int64(42),
 							"created_time":     ts,
 							"run_id":           &fakeUUID{uuid: "runid1"},
 							"partition_config": map[string]string{},
 						},
+						"ttl": 2,
 					},
 					{
 						"task_id": int64(2),
 						"task": map[string]interface{}{
 							"domain_id":        &fakeUUID{uuid: "domain1"},
-							"worklow_id":       "wid1",
+							"workflow_id":      "wid1",
 							"schedule_id":      int64(45),
 							"created_time":     ts,
 							"run_id":           &fakeUUID{uuid: "runid1"},
 							"partition_config": map[string]string{},
 						},
+						"ttl": nil,
 					},
 					{
 						"missing_task_id": int64(1), // missing task_id so this row will be skipped
@@ -947,23 +949,25 @@ func TestSelectTasks(t *testing.T) {
 						"task_id": int64(3),
 						"task": map[string]interface{}{
 							"domain_id":        &fakeUUID{uuid: "domain1"},
-							"worklow_id":       "wid1",
+							"workflow_id":      "wid1",
 							"schedule_id":      int64(48),
 							"created_time":     ts,
 							"run_id":           &fakeUUID{uuid: "runid1"},
 							"partition_config": map[string]string{},
 						},
+						"ttl": 4,
 					},
 					{
 						"task_id": int64(4), // this will be skipped because filter.BatchSize is reached
 						"task": map[string]interface{}{
 							"domain_id":        &fakeUUID{uuid: "domain1"},
-							"worklow_id":       "wid1",
+							"workflow_id":      "wid1",
 							"schedule_id":      int64(51),
 							"created_time":     ts,
 							"run_id":           &fakeUUID{uuid: "runid1"},
 							"partition_config": map[string]string{},
 						},
+						"ttl": 5,
 					},
 				},
 			},
@@ -971,30 +975,36 @@ func TestSelectTasks(t *testing.T) {
 				{
 					DomainID:        "domain1",
 					TaskID:          1,
+					WorkflowID:      "wid1",
 					RunID:           "runid1",
 					ScheduledID:     42,
+					Expiry:          ts.Add(time.Second * 2),
 					CreatedTime:     ts,
 					PartitionConfig: map[string]string{},
 				},
 				{
 					DomainID:        "domain1",
 					TaskID:          2,
+					WorkflowID:      "wid1",
 					RunID:           "runid1",
 					ScheduledID:     45,
+					Expiry:          time.Time{},
 					CreatedTime:     ts,
 					PartitionConfig: map[string]string{},
 				},
 				{
 					DomainID:        "domain1",
 					TaskID:          3,
+					WorkflowID:      "wid1",
 					RunID:           "runid1",
 					ScheduledID:     48,
+					Expiry:          ts.Add(time.Second * 4),
 					CreatedTime:     ts,
 					PartitionConfig: map[string]string{},
 				},
 			},
 			wantQueries: []string{
-				`SELECT task_id, task FROM tasks WHERE domain_id = domain1 and task_list_name = tasklist1 and task_list_type = 1 and type = 0 and task_id > 0 and task_id <= 100`,
+				`SELECT task_id, task, TTL(task) AS ttl FROM tasks WHERE domain_id = domain1 and task_list_name = tasklist1 and task_list_type = 1 and type = 0 and task_id > 0 and task_id <= 100`,
 			},
 		},
 	}
@@ -1017,7 +1027,9 @@ func TestSelectTasks(t *testing.T) {
 			client := gocql.NewMockClient(ctrl)
 			cfg := &config.NoSQL{}
 			logger := testlogger.New(t)
-			db := newCassandraDBFromSession(cfg, session, logger, nil, dbWithClient(client))
+			timeSrc := clock.NewMockedTimeSourceAt(ts)
+
+			db := newCassandraDBFromSession(cfg, session, logger, nil, dbWithClient(client), dbWithTimeSource(timeSrc))
 
 			gotRows, err := db.SelectTasks(context.Background(), tc.filter)
 
