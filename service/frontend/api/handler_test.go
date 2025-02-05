@@ -775,7 +775,7 @@ func (s *workflowHandlerSuite) TestDiagnoseWorkflowExecution_Success() {
 		Identity: "",
 	}
 	diagnosticWfDomain := "cadence-system"
-	diagnosticWfID := fmt.Sprintf("%s-%s-%s", testDomain, testWorkflowID, testRunID)
+	diagnosticWfID := fmt.Sprintf("%s-%s", testDomain, testRunID)
 	diagnosticWfRunID := "123"
 	resp := &types.DiagnoseWorkflowExecutionResponse{
 		Domain: diagnosticWfDomain,

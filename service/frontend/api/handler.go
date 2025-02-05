@@ -217,14 +217,14 @@ func (wh *WorkflowHandler) DiagnoseWorkflowExecution(ctx context.Context, reques
 	}
 
 	wfExecution := request.GetWorkflowExecution()
-	diagnosticWorkflowID := fmt.Sprintf("%s-%s-%s", request.GetDomain(), wfExecution.GetWorkflowID(), wfExecution.GetRunID())
 	diagnosticWorkflowDomain := "cadence-system"
+	diagnosticWorkflowID := fmt.Sprintf("%s-%s", request.GetDomain(), wfExecution.GetRunID())
 
 	diagnosticWorkflowInput := diagnostics.DiagnosticsStarterWorkflowInput{
 		Domain:     request.GetDomain(),
 		WorkflowID: request.GetWorkflowExecution().GetWorkflowID(),
 		RunID:      request.GetWorkflowExecution().GetRunID(),
-		Identity:   request.Identity,
+		Identity:   request.GetIdentity(),
 	}
 	inputInBytes, err := json.Marshal(diagnosticWorkflowInput)
 	if err != nil {
@@ -243,7 +243,7 @@ func (wh *WorkflowHandler) DiagnoseWorkflowExecution(ctx context.Context, reques
 		Input:                               inputInBytes,
 		ExecutionStartToCloseTimeoutSeconds: common.Int32Ptr(86400), // 24 hours
 		TaskStartToCloseTimeoutSeconds:      common.Int32Ptr(300),   // 5 minutes
-		Identity:                            request.Identity,
+		Identity:                            request.GetIdentity(),
 		RequestID:                           uuid.New().String(),
 		WorkflowIDReusePolicy:               types.WorkflowIDReusePolicyAllowDuplicate.Ptr(),
 	})
