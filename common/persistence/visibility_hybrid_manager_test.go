@@ -46,6 +46,7 @@ const (
 	pinotStoreName          = "pinot"
 	VisibilityOverrideES    = "es"
 	VisibilityOverridePinot = "pinot"
+	testStoreName           = "test"
 )
 
 func TestNewVisibilityHybridManager(t *testing.T) {
@@ -77,7 +78,7 @@ func TestNewVisibilityHybridManager(t *testing.T) {
 					esStoreName:    test.mockESVisibilityManager,
 					pinotStoreName: test.mockPinotVisibilityManager,
 				}
-				NewVisibilityHybridManager(visibilityMgrs, nil, dynamicconfig.GetStringPropertyFn(esStoreName), nil, log.NewNoop())
+				NewVisibilityHybridManager(visibilityMgrs, nil, dynamicconfig.GetStringPropertyFn(esStoreName), nil, testStoreName, log.NewNoop())
 			})
 		})
 	}
@@ -87,7 +88,7 @@ func TestNewVisibilityHybridManager_EmptyVisibilityMgr(t *testing.T) {
 	// put this outside because need to use it as an input of the table tests
 	assert.NotPanics(t, func() {
 		visibilityMgrs := map[string]VisibilityManager{}
-		NewVisibilityHybridManager(visibilityMgrs, nil, nil, nil, log.NewNoop())
+		NewVisibilityHybridManager(visibilityMgrs, nil, nil, nil, testStoreName, log.NewNoop())
 	})
 }
 
@@ -139,7 +140,7 @@ func TestVisibilityHybridManagerClose(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, dynamicconfig.GetStringPropertyFn(esStoreName), nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, dynamicconfig.GetStringPropertyFn(esStoreName), nil, testStoreName, log.NewNoop())
 			assert.NotPanics(t, func() {
 				visibilityManager.Close()
 			})
@@ -148,62 +149,11 @@ func TestVisibilityHybridManagerClose(t *testing.T) {
 }
 
 func TestVisibilityHybridManagerGetName(t *testing.T) {
-	// put this outside because need to use it as an input of the table tests
-	ctrl := gomock.NewController(t)
-
-	tests := map[string]struct {
-		mockDBVisibilityManager              VisibilityManager
-		mockESVisibilityManager              VisibilityManager
-		mockPinotVisibilityManager           VisibilityManager
-		mockDBVisibilityManagerAffordance    func(mockDBVisibilityManager *MockVisibilityManager)
-		mockPinotVisibilityManagerAffordance func(mockPinotVisibilityManager *MockVisibilityManager)
-		mockESVisibilityManagerAffordance    func(mockESVisibilityManager *MockVisibilityManager)
-		writeVisibilityStoreName             dynamicconfig.StringPropertyFn
-	}{
-		"Case1-1: success case with DB visibility is not nil": {
-			mockDBVisibilityManager: NewMockVisibilityManager(ctrl),
-			mockDBVisibilityManagerAffordance: func(mockDBVisibilityManager *MockVisibilityManager) {
-				mockDBVisibilityManager.EXPECT().GetName().Return(testTableName).Times(1)
-			},
-			writeVisibilityStoreName: dynamicconfig.GetStringPropertyFn(dbVisStoreName),
-		},
-		"Case1-2: success case with ES visibility is not nil": {
-			mockESVisibilityManager: NewMockVisibilityManager(ctrl),
-			mockESVisibilityManagerAffordance: func(mockESVisibilityManager *MockVisibilityManager) {
-				mockESVisibilityManager.EXPECT().GetName().Return(testTableName).Times(1)
-			},
-			writeVisibilityStoreName: dynamicconfig.GetStringPropertyFn(esStoreName),
-		},
-		"Case1-3: success case with pinot visibility is not nil": {
-			mockPinotVisibilityManager: NewMockVisibilityManager(ctrl),
-			mockPinotVisibilityManagerAffordance: func(mockPinotVisibilityManager *MockVisibilityManager) {
-				mockPinotVisibilityManager.EXPECT().GetName().Return(testTableName).Times(1)
-			},
-			writeVisibilityStoreName: dynamicconfig.GetStringPropertyFn(pinotStoreName),
-		},
+	visibilityMgrs := map[string]VisibilityManager{
+		dbVisStoreName: NewMockVisibilityManager(gomock.NewController(t)),
 	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			if test.mockDBVisibilityManager != nil {
-				test.mockDBVisibilityManagerAffordance(test.mockDBVisibilityManager.(*MockVisibilityManager))
-			}
-			if test.mockPinotVisibilityManager != nil {
-				test.mockPinotVisibilityManagerAffordance(test.mockPinotVisibilityManager.(*MockVisibilityManager))
-			}
-			if test.mockESVisibilityManager != nil {
-				test.mockESVisibilityManagerAffordance(test.mockESVisibilityManager.(*MockVisibilityManager))
-			}
-			visibilityMgrs := map[string]VisibilityManager{
-				dbVisStoreName: test.mockDBVisibilityManager,
-				esStoreName:    test.mockESVisibilityManager,
-				pinotStoreName: test.mockPinotVisibilityManager,
-			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
-			assert.NotPanics(t, func() {
-				visibilityManager.GetName()
-			})
-		})
-	}
+	visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, dynamicconfig.GetStringPropertyFn(dbVisStoreName), nil, testStoreName, log.NewNoop())
+	assert.Equal(t, testStoreName, visibilityManager.GetName())
 }
 
 func TestVisibilityHybridRecordWorkflowExecutionStarted(t *testing.T) {
@@ -275,7 +225,7 @@ func TestVisibilityHybridRecordWorkflowExecutionStarted(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, testStoreName, log.NewNoop())
 
 			err := visibilityManager.RecordWorkflowExecutionStarted(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -540,7 +490,7 @@ func TestVisibilityHybridRecordWorkflowExecutionClosed(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, testStoreName, log.NewNoop())
 
 			err := visibilityManager.RecordWorkflowExecutionClosed(test.context, test.request)
 			if test.expectedError != nil {
@@ -563,7 +513,7 @@ func TestVisibilityHybridChooseVisibilityModeForAdmin(t *testing.T) {
 		esStoreName:    esManager,
 		pinotStoreName: pntManager,
 	}
-	mgr := NewVisibilityHybridManager(visibilityMgrs, nil, nil, nil, log.NewNoop())
+	mgr := NewVisibilityHybridManager(visibilityMgrs, nil, nil, nil, testStoreName, log.NewNoop())
 	tripleManager := mgr.(*visibilityHybridManager)
 	tripleManager.visibilityMgrs[dbVisStoreName] = nil
 	tripleManager.visibilityMgrs[esStoreName] = nil
@@ -641,7 +591,7 @@ func TestVisibilityHybridRecordWorkflowExecutionUninitialized(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, testStoreName, log.NewNoop())
 
 			err := visibilityManager.RecordWorkflowExecutionUninitialized(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -715,7 +665,7 @@ func TestVisibilityHybridUpsertWorkflowExecution(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, testStoreName, log.NewNoop())
 
 			err := visibilityManager.UpsertWorkflowExecution(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -789,7 +739,7 @@ func TestVisibilityHybridDeleteWorkflowExecution(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, testStoreName, log.NewNoop())
 
 			err := visibilityManager.DeleteWorkflowExecution(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -876,7 +826,7 @@ func TestVisibilityHybridDeleteUninitializedWorkflowExecution(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, nil, test.writeVisibilityStoreName, nil, testStoreName, log.NewNoop())
 
 			err := visibilityManager.DeleteUninitializedWorkflowExecution(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -1066,7 +1016,7 @@ func TestVisibilityHybridListOpenWorkflowExecutions(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListOpenWorkflowExecutions(context.Background(), test.request)
 
@@ -1236,7 +1186,7 @@ func TestVisibilityHybridListClosedWorkflowExecutions(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListClosedWorkflowExecutions(test.context, test.request)
 			if test.expectedError != nil {
@@ -1350,7 +1300,7 @@ func TestVisibilityHybridListOpenWorkflowExecutionsByType(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListOpenWorkflowExecutionsByType(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -1464,7 +1414,7 @@ func TestVisibilityHybridListClosedWorkflowExecutionsByType(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListClosedWorkflowExecutionsByType(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -1579,7 +1529,7 @@ func TestVisibilityHybridListOpenWorkflowExecutionsByWorkflowID(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListOpenWorkflowExecutionsByWorkflowID(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -1693,7 +1643,7 @@ func TestVisibilityHybridListClosedWorkflowExecutionsByWorkflowID(t *testing.T) 
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListClosedWorkflowExecutionsByWorkflowID(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -1808,7 +1758,7 @@ func TestVisibilityHybridListClosedWorkflowExecutionsByStatus(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListClosedWorkflowExecutionsByStatus(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -1920,7 +1870,7 @@ func TestVisibilityHybridGetClosedWorkflowExecution(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.GetClosedWorkflowExecution(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -2032,7 +1982,7 @@ func TestVisibilityHybridListWorkflowExecutions(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ListWorkflowExecutions(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -2145,7 +2095,7 @@ func TestVisibilityHybridScanWorkflowExecutions(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.ScanWorkflowExecutions(context.Background(), test.request)
 			if test.expectedError != nil {
@@ -2256,7 +2206,7 @@ func TestVisibilityHybridCountWorkflowExecutions(t *testing.T) {
 				esStoreName:    test.mockESVisibilityManager,
 				pinotStoreName: test.mockPinotVisibilityManager,
 			}
-			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), log.NewNoop())
+			visibilityManager := NewVisibilityHybridManager(visibilityMgrs, test.readVisibilityStoreName, nil, dynamicconfig.GetBoolPropertyFnFilteredByDomain(true), testStoreName, log.NewNoop())
 
 			_, err := visibilityManager.CountWorkflowExecutions(context.Background(), test.request)
 			if test.expectedError != nil {
