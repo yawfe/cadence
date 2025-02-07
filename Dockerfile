@@ -92,6 +92,7 @@ RUN apk add --update --no-cache ca-certificates py3-pip mysql-client
 RUN pip3 install cqlsh && cqlsh --version
 
 COPY docker/start.sh /start.sh
+COPY docker/domain /etc/cadence/domain
 
 CMD /start.sh
 
