@@ -23,11 +23,13 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/mock/gomock"
+	"go.uber.org/yarpc"
 
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/tools/cli/clitest"
@@ -49,24 +51,6 @@ func TestAdminGetDynamicConfig(t *testing.T) {
 			errContains: "Required flag not found",
 		},
 		{
-			name: "calling with required arguments",
-			testSetup: func(td *cliTestData) *cli.Context {
-				cliCtx := clitest.NewCLIContext(
-					t,
-					td.app,
-					clitest.StringArgument(FlagDynamicConfigName, testDynamicConfigName),
-				)
-
-				td.mockAdminClient.EXPECT().ListDynamicConfig(gomock.Any(),
-					&types.ListDynamicConfigRequest{
-						ConfigName: testDynamicConfigName,
-					}).Return(nil, nil)
-
-				return cliCtx
-			},
-			errContains: "",
-		},
-		{
 			name: "failed to get dynamic config values",
 			testSetup: func(td *cliTestData) *cli.Context {
 				cliCtx := clitest.NewCLIContext(
@@ -75,17 +59,17 @@ func TestAdminGetDynamicConfig(t *testing.T) {
 					clitest.StringArgument(FlagDynamicConfigName, testDynamicConfigName),
 				)
 
-				td.mockAdminClient.EXPECT().ListDynamicConfig(gomock.Any(),
-					&types.ListDynamicConfigRequest{
-						ConfigName: testDynamicConfigName,
-					}).Return(nil, assert.AnError)
-
+				td.mockAdminClient.EXPECT().GetDynamicConfig(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, request *types.GetDynamicConfigRequest, _ ...yarpc.CallOption) (*types.GetDynamicConfigResponse, error) {
+						assert.Equal(t, request.ConfigName, testDynamicConfigName)
+						return nil, assert.AnError
+					})
 				return cliCtx
 			},
-			errContains: "Failed to get dynamic config value(s)",
+			errContains: "Failed to get dynamic config value",
 		},
 		{
-			name: "received a list of dynamic config values",
+			name: "received a dynamic config value successfully",
 			testSetup: func(td *cliTestData) *cli.Context {
 				cliCtx := clitest.NewCLIContext(
 					t,
@@ -93,32 +77,64 @@ func TestAdminGetDynamicConfig(t *testing.T) {
 					clitest.StringArgument(FlagDynamicConfigName, testDynamicConfigName),
 				)
 
-				td.mockAdminClient.EXPECT().ListDynamicConfig(gomock.Any(),
-					&types.ListDynamicConfigRequest{
-						ConfigName: testDynamicConfigName,
-					}).Return(&types.ListDynamicConfigResponse{
-					Entries: []*types.DynamicConfigEntry{
-						{
-							Name: testDynamicConfigName,
-							Values: []*types.DynamicConfigValue{
-								{
-									Value: &types.DataBlob{
-										EncodingType: types.EncodingTypeThriftRW.Ptr(),
-										Data:         []byte("config-value"),
-									},
-									Filters: []*types.DynamicConfigFilter{
-										{
-											Name: "Filter1",
-											Value: &types.DataBlob{
-												EncodingType: types.EncodingTypeThriftRW.Ptr(),
-												Data:         []byte("filter-value"),
-											},
-										},
-									},
+				td.mockAdminClient.EXPECT().GetDynamicConfig(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, request *types.GetDynamicConfigRequest, _ ...yarpc.CallOption) (*types.GetDynamicConfigResponse, error) {
+						assert.Equal(t, request.ConfigName, testDynamicConfigName)
+						return &types.GetDynamicConfigResponse{
+							Value: &types.DataBlob{
+								EncodingType: types.EncodingTypeThriftRW.Ptr(),
+								Data:         []byte(`"config-value"`),
+							},
+						}, nil
+					})
+				return cliCtx
+			},
+			errContains: "",
+		},
+		{
+			name: "received a dynamic config value with filters successfully",
+			testSetup: func(td *cliTestData) *cli.Context {
+				cliCtx := clitest.NewCLIContext(
+					t,
+					td.app,
+					clitest.StringArgument(FlagDynamicConfigName, testDynamicConfigName),
+					clitest.StringArgument(FlagDynamicConfigFilter,
+						`{"domainName":"test-domain", "shardID": 1, "isEnabled": true}`),
+				)
+
+				td.mockAdminClient.EXPECT().GetDynamicConfig(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, request *types.GetDynamicConfigRequest, _ ...yarpc.CallOption) (*types.GetDynamicConfigResponse, error) {
+						assert.Equal(t, request.ConfigName, testDynamicConfigName)
+						assert.ElementsMatch(t, request.Filters, []*types.DynamicConfigFilter{
+							{
+								Name: "domainName",
+								Value: &types.DataBlob{
+									EncodingType: types.EncodingTypeJSON.Ptr(),
+									Data:         []byte(`"test-domain"`),
 								},
 							},
-						},
-					}}, nil)
+							{
+								Name: "shardID",
+								Value: &types.DataBlob{
+									EncodingType: types.EncodingTypeJSON.Ptr(),
+									Data:         []byte(`1`),
+								},
+							},
+							{
+								Name: "isEnabled",
+								Value: &types.DataBlob{
+									EncodingType: types.EncodingTypeJSON.Ptr(),
+									Data:         []byte(`true`),
+								},
+							},
+						})
+						return &types.GetDynamicConfigResponse{
+							Value: &types.DataBlob{
+								EncodingType: types.EncodingTypeThriftRW.Ptr(),
+								Data:         []byte(`"config-value"`),
+							},
+						}, nil
+					})
 				return cliCtx
 			},
 			errContains: "",
@@ -222,7 +238,7 @@ func TestAdminRestoreDynamicConfig(t *testing.T) {
 					t,
 					td.app,
 					clitest.StringArgument(FlagDynamicConfigName, testDynamicConfigName),
-					clitest.StringArgument(FlagDynamicConfigFilter, "{'Name':'domainName', 'Value':'test-domain'}"),
+					clitest.StringArgument(FlagDynamicConfigFilter, `{"domainName":"test-domain"}`),
 				)
 
 				td.mockAdminClient.EXPECT().RestoreDynamicConfig(gomock.Any(), gomock.Any()).Return(nil)
