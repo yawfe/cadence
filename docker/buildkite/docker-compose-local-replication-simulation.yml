@@ -66,14 +66,17 @@ services:
       - "7002:7002" # history prometheus
       - "7003:7003" # worker prometheus
     environment:
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/replication_simulation_${SCENARIO}.yml
+      - "CLUSTER_REDIRECT_POLICY=selected-apis-forwarding"
       - "BIND_ON_IP=0.0.0.0"
       - "PRIMARY_FRONTEND_SERVICE=cadence-cluster0"
       - "SECONDARY_FRONTEND_SERVICE=cadence-cluster1"
       - "CASSANDRA_SEEDS=cassandra"
-      - "DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/replication_simulation_${SCENARIO}.yml"
       - "ENABLE_GLOBAL_DOMAIN=true"
       - "KEYSPACE=cadence_primary"
       - "VISIBILITY_KEYSPACE=cadence_visibility_primary"
+      - "LOG_LEVEL=debug"
+      - "MATCHING_LOG_EVENTS=true"
       - "PROMETHEUS_ENDPOINT_0=0.0.0.0:7000" # frontend scrape endpoint
       - "PROMETHEUS_ENDPOINT_1=0.0.0.0:7001" # matching scrape endpoint
       - "PROMETHEUS_ENDPOINT_2=0.0.0.0:7002" # history scrape endpoint
@@ -109,15 +112,18 @@ services:
       - "8002:8002" # history prometheus
       - "8003:8003" # worker prometheus
     environment:
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/replication_simulation_${SCENARIO}.yml
+      - "CLUSTER_REDIRECT_POLICY=selected-apis-forwarding"
       - "BIND_ON_IP=0.0.0.0"
       - "PRIMARY_FRONTEND_SERVICE=cadence-cluster0"
       - "SECONDARY_FRONTEND_SERVICE=cadence-cluster1"
       - "CASSANDRA_SEEDS=cassandra"
-      - "DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/replication_simulation_${SCENARIO}.yml"
       - "IS_NOT_PRIMARY=true"
       - "ENABLE_GLOBAL_DOMAIN=true"
       - "KEYSPACE=cadence_secondary"
       - "VISIBILITY_KEYSPACE=cadence_visibility_secondary"
+      - "LOG_LEVEL=debug"
+      - "MATCHING_LOG_EVENTS=true"
       - "PROMETHEUS_ENDPOINT_0=0.0.0.0:8000" # frontend scrape endpoint
       - "PROMETHEUS_ENDPOINT_1=0.0.0.0:8001" # matching scrape endpoint
       - "PROMETHEUS_ENDPOINT_2=0.0.0.0:8002" # history scrape endpoint
@@ -132,7 +138,7 @@ services:
         aliases:
           - cadence-cluster1
 
-  cadence-web-cluster0:
+  cadence-web0:
     image: ubercadence/web:latest
     environment:
       - "CADENCE_TCHANNEL_PEERS=cadence-cluster0:7933"
@@ -143,9 +149,9 @@ services:
     networks:
       services-network:
         aliases:
-          - cadence-web-cluster0
+          - cadence-web0
 
-  cadence-web-cluster1:
+  cadence-web1:
     image: ubercadence/web:latest
     environment:
       - "CADENCE_TCHANNEL_PEERS=cadence-cluster1:7933"
@@ -156,7 +162,69 @@ services:
     networks:
       services-network:
         aliases:
-          - cadence-web-cluster0
+          - cadence-web1
+
+  cadence-worker0:
+    build:
+      context: ../../
+      dockerfile: ./docker/buildkite/Dockerfile
+    working_dir: /cadence/simulation/replication/worker/cmd
+    command:
+      - /bin/sh
+      - -e
+      - -c
+      - >
+        go run *.go --cluster cluster0 | tee worker0.log
+    depends_on:
+      cadence-cluster0:
+        condition: service_started
+      cadence-cluster1:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6060/health"]
+      interval: 10s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - ../../:/cadence
+      - /cadence/.build/ # ensure we don't mount the build directory
+      - /cadence/.bin/ # ensure we don't mount the bin directory
+      - ../../simulation/replication/testdata/:/cadence/simulation/replication/worker/cmd/testdata/
+    networks:
+      services-network:
+        aliases:
+          - cadence-worker0
+
+  cadence-worker1:
+    build:
+      context: ../../
+      dockerfile: ./docker/buildkite/Dockerfile
+    working_dir: /cadence/simulation/replication/worker/cmd
+    command:
+      - /bin/sh
+      - -e
+      - -c
+      - >
+        go run *.go --cluster cluster1 | tee worker1.log
+    depends_on:
+      cadence-cluster0:
+        condition: service_started
+      cadence-cluster1:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6060/health"]
+      interval: 10s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - ../../:/cadence
+      - /cadence/.build/ # ensure we don't mount the build directory
+      - /cadence/.bin/ # ensure we don't mount the bin directory
+      - ../../simulation/replication/testdata/:/cadence/simulation/replication/worker/cmd/testdata/
+    networks:
+      services-network:
+        aliases:
+          - cadence-worker1
 
   replication-simulator:
     build:
@@ -176,11 +244,15 @@ services:
     depends_on:
       cadence-cluster0:
         condition: service_started
+      cadence-worker0:
+        condition: service_started
+      cadence-web0:
+        condition: service_started
       cadence-cluster1:
         condition: service_started
-      cadence-web-cluster0:
+      cadence-worker1:
         condition: service_started
-      cadence-web-cluster1:
+      cadence-web1:
         condition: service_started
       grafana:
         condition: service_started
