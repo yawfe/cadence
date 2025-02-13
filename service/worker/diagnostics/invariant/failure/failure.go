@@ -67,15 +67,15 @@ func (f *failure) Check(ctx context.Context, params invariant.InvariantCheckInpu
 			attr := event.ActivityTaskFailedEventAttributes
 			reason := attr.Reason
 			scheduled := fetchScheduledEvent(attr, events)
-			started := fetchStartedEvent(attr, events)
 			if *reason == common.FailureReasonHeartbeatExceedsLimit {
 				result = append(result, invariant.InvariantCheckResult{
 					InvariantType: ActivityFailed.String(),
 					Reason:        HeartBeatBlobSizeLimit.String(),
 					Metadata: invariant.MarshalData(FailureMetadata{
-						Identity:          attr.Identity,
-						ActivityScheduled: scheduled,
-						ActivityStarted:   started,
+						Identity:            attr.Identity,
+						ActivityType:        scheduled.ActivityType.GetName(),
+						ActivityScheduledID: attr.ScheduledEventID,
+						ActivityStartedID:   attr.StartedEventID,
 					}),
 				})
 			} else if *reason == common.FailureReasonCompleteResultExceedsLimit {
@@ -83,9 +83,10 @@ func (f *failure) Check(ctx context.Context, params invariant.InvariantCheckInpu
 					InvariantType: ActivityFailed.String(),
 					Reason:        ActivityOutputBlobSizeLimit.String(),
 					Metadata: invariant.MarshalData(FailureMetadata{
-						Identity:          attr.Identity,
-						ActivityScheduled: scheduled,
-						ActivityStarted:   started,
+						Identity:            attr.Identity,
+						ActivityType:        scheduled.ActivityType.GetName(),
+						ActivityScheduledID: attr.ScheduledEventID,
+						ActivityStartedID:   attr.StartedEventID,
 					}),
 				})
 			} else {
@@ -93,9 +94,10 @@ func (f *failure) Check(ctx context.Context, params invariant.InvariantCheckInpu
 					InvariantType: ActivityFailed.String(),
 					Reason:        ErrorTypeFromReason(*reason).String(),
 					Metadata: invariant.MarshalData(FailureMetadata{
-						Identity:          attr.Identity,
-						ActivityScheduled: scheduled,
-						ActivityStarted:   started,
+						Identity:            attr.Identity,
+						ActivityType:        scheduled.ActivityType.GetName(),
+						ActivityScheduledID: attr.ScheduledEventID,
+						ActivityStartedID:   attr.StartedEventID,
 					}),
 				})
 			}
@@ -118,15 +120,6 @@ func ErrorTypeFromReason(reason string) ErrorType {
 	return CustomError
 }
 
-func fetchIdentity(attr *types.WorkflowExecutionFailedEventAttributes, events []*types.HistoryEvent) string {
-	for _, event := range events {
-		if event.ID == attr.DecisionTaskCompletedEventID {
-			return event.GetDecisionTaskCompletedEventAttributes().Identity
-		}
-	}
-	return ""
-}
-
 func fetchScheduledEvent(attr *types.ActivityTaskFailedEventAttributes, events []*types.HistoryEvent) *types.ActivityTaskScheduledEventAttributes {
 	for _, event := range events {
 		if event.ID == attr.GetScheduledEventID() {
@@ -136,13 +129,13 @@ func fetchScheduledEvent(attr *types.ActivityTaskFailedEventAttributes, events [
 	return nil
 }
 
-func fetchStartedEvent(attr *types.ActivityTaskFailedEventAttributes, events []*types.HistoryEvent) *types.ActivityTaskStartedEventAttributes {
+func fetchIdentity(attr *types.WorkflowExecutionFailedEventAttributes, events []*types.HistoryEvent) string {
 	for _, event := range events {
-		if event.ID == attr.GetStartedEventID() {
-			return event.GetActivityTaskStartedEventAttributes()
+		if event.ID == attr.DecisionTaskCompletedEventID {
+			return event.GetDecisionTaskCompletedEventAttributes().Identity
 		}
 	}
-	return nil
+	return ""
 }
 
 func (f *failure) RootCause(ctx context.Context, params invariant.InvariantRootCauseInput) ([]invariant.InvariantRootCauseResult, error) {

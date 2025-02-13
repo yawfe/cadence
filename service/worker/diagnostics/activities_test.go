@@ -51,23 +51,15 @@ const (
 func Test__identifyIssues(t *testing.T) {
 	dwtest := testDiagnosticWorkflow(t)
 	actMetadata := failure.FailureMetadata{
-		Identity: "localhost",
-		ActivityScheduled: &types.ActivityTaskScheduledEventAttributes{
-			ActivityID:   "101",
-			ActivityType: &types.ActivityType{Name: "test-activity"},
-			RetryPolicy: &types.RetryPolicy{
-				InitialIntervalInSeconds: 1,
-				MaximumAttempts:          1,
-			},
-		},
-		ActivityStarted: &types.ActivityTaskStartedEventAttributes{
-			Identity: "localhost",
-			Attempt:  0,
-		},
+		Identity:            "localhost",
+		ActivityType:        "test-activity",
+		ActivityScheduledID: 2,
+		ActivityStartedID:   3,
 	}
 	actMetadataInBytes, err := json.Marshal(actMetadata)
 	require.NoError(t, err)
 	retryMetadata := retry.RetryMetadata{
+		EventID: 2,
 		RetryPolicy: &types.RetryPolicy{
 			InitialIntervalInSeconds: 1,
 			MaximumAttempts:          1,
@@ -98,15 +90,9 @@ func Test__identifyIssues(t *testing.T) {
 func Test__rootCauseIssues(t *testing.T) {
 	dwtest := testDiagnosticWorkflow(t)
 	actMetadata := failure.FailureMetadata{
-		Identity: "localhost",
-		ActivityScheduled: &types.ActivityTaskScheduledEventAttributes{
-			ActivityID:   "101",
-			ActivityType: &types.ActivityType{Name: "test-activity"},
-		},
-		ActivityStarted: &types.ActivityTaskStartedEventAttributes{
-			Identity: "localhost",
-			Attempt:  0,
-		},
+		Identity:            "localhost",
+		ActivityScheduledID: 1,
+		ActivityStartedID:   2,
 	}
 	actMetadataInBytes, err := json.Marshal(actMetadata)
 	require.NoError(t, err)
