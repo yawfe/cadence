@@ -44,6 +44,7 @@ import (
 	"github.com/uber/cadence/common/log/testlogger"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
+	p "github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/persistence/client"
 	"github.com/uber/cadence/common/persistence/nosql"
 	"github.com/uber/cadence/common/persistence/persistence-tests/testcluster"
@@ -152,6 +153,7 @@ func NewTestBaseWithNoSQL(t *testing.T, options *TestBaseOptions) *TestBase {
 		EnableCassandraAllConsistencyLevelDelete: dynamicconfig.GetBoolPropertyFn(true),
 		PersistenceSampleLoggingRate:             dynamicconfig.GetIntPropertyFn(100),
 		EnableShardIDMetrics:                     dynamicconfig.GetBoolPropertyFn(true),
+		EnableHistoryTaskDualWriteMode:           dynamicconfig.GetBoolPropertyFn(true),
 	}
 	params := TestBaseParams{
 		DefaultTestCluster:    testCluster,
@@ -180,6 +182,7 @@ func NewTestBaseWithSQL(t *testing.T, options *TestBaseOptions) *TestBase {
 		EnableCassandraAllConsistencyLevelDelete: dynamicconfig.GetBoolPropertyFn(true),
 		PersistenceSampleLoggingRate:             dynamicconfig.GetIntPropertyFn(100),
 		EnableShardIDMetrics:                     dynamicconfig.GetBoolPropertyFn(true),
+		EnableHistoryTaskDualWriteMode:           dynamicconfig.GetBoolPropertyFn(true),
 	}
 	params := TestBaseParams{
 		DefaultTestCluster:    testCluster,
@@ -380,13 +383,18 @@ func (s *TestBase) CreateWorkflowExecutionWithBranchToken(
 			TasksByCategory: map[persistence.HistoryTaskCategory][]persistence.Task{
 				persistence.HistoryTaskCategoryTransfer: []persistence.Task{
 					&persistence.DecisionTask{
+						WorkflowIdentifier: p.WorkflowIdentifier{
+							DomainID:   domainID,
+							WorkflowID: workflowExecution.WorkflowID,
+							RunID:      workflowExecution.RunID,
+						},
 						TaskData: persistence.TaskData{
 							TaskID:              s.GetNextSequenceNumber(),
 							VisibilityTimestamp: time.Now(),
 						},
-						DomainID:   domainID,
-						TaskList:   taskList,
-						ScheduleID: decisionScheduleID,
+						TargetDomainID: domainID,
+						TaskList:       taskList,
+						ScheduleID:     decisionScheduleID,
 					},
 				},
 				persistence.HistoryTaskCategoryTimer: timerTasks,
@@ -467,12 +475,17 @@ func (s *TestBase) CreateChildWorkflowExecution(ctx context.Context, domainID st
 			TasksByCategory: map[persistence.HistoryTaskCategory][]persistence.Task{
 				persistence.HistoryTaskCategoryTransfer: []persistence.Task{
 					&persistence.DecisionTask{
+						WorkflowIdentifier: p.WorkflowIdentifier{
+							DomainID:   domainID,
+							WorkflowID: workflowExecution.WorkflowID,
+							RunID:      workflowExecution.RunID,
+						},
 						TaskData: persistence.TaskData{
 							TaskID: s.GetNextSequenceNumber(),
 						},
-						DomainID:   domainID,
-						TaskList:   taskList,
-						ScheduleID: decisionScheduleID,
+						TargetDomainID: domainID,
+						TaskList:       taskList,
+						ScheduleID:     decisionScheduleID,
 					},
 				},
 				persistence.HistoryTaskCategoryTimer: timerTasks,
@@ -542,12 +555,17 @@ func (s *TestBase) ContinueAsNewExecution(
 
 	now := time.Now()
 	newdecisionTask := &persistence.DecisionTask{
+		WorkflowIdentifier: p.WorkflowIdentifier{
+			DomainID:   updatedInfo.DomainID,
+			WorkflowID: updatedInfo.WorkflowID,
+			RunID:      updatedInfo.RunID,
+		},
 		TaskData: persistence.TaskData{
 			TaskID: s.GetNextSequenceNumber(),
 		},
-		DomainID:   updatedInfo.DomainID,
-		TaskList:   updatedInfo.TaskList,
-		ScheduleID: int64(decisionScheduleID),
+		TargetDomainID: updatedInfo.DomainID,
+		TaskList:       updatedInfo.TaskList,
+		ScheduleID:     int64(decisionScheduleID),
 	}
 	versionHistory := persistence.NewVersionHistory([]byte{}, []*persistence.VersionHistoryItem{
 		{
@@ -661,7 +679,14 @@ func (s *TestBase) UpdateWorkflowExecutionAndFinish(
 	versionHistories *persistence.VersionHistories,
 ) error {
 	transferTasks := []persistence.Task{}
-	transferTasks = append(transferTasks, &persistence.CloseExecutionTask{TaskData: persistence.TaskData{TaskID: s.GetNextSequenceNumber()}})
+	transferTasks = append(transferTasks, &persistence.CloseExecutionTask{
+		WorkflowIdentifier: persistence.WorkflowIdentifier{
+			DomainID:   updatedInfo.DomainID,
+			WorkflowID: updatedInfo.WorkflowID,
+			RunID:      updatedInfo.RunID,
+		},
+		TaskData: persistence.TaskData{TaskID: s.GetNextSequenceNumber()},
+	})
 	_, err := s.ExecutionManager.UpdateWorkflowExecution(ctx, &persistence.UpdateWorkflowExecutionRequest{
 		RangeID: s.ShardInfo.RangeID,
 		UpdateWorkflowMutation: persistence.WorkflowMutation{
@@ -1081,7 +1106,6 @@ func (s *TestBase) UpdateWorkflowExecutionWithReplication(
 			*persistence.CloseExecutionTask,
 			*persistence.RecordWorkflowClosedTask,
 			*persistence.RecordChildExecutionCompletedTask,
-			*persistence.ApplyParentClosePolicyTask,
 			*persistence.CancelExecutionTask,
 			*persistence.StartChildExecutionTask,
 			*persistence.SignalExecutionTask,
@@ -1097,22 +1121,32 @@ func (s *TestBase) UpdateWorkflowExecutionWithReplication(
 	}
 	for _, decisionScheduleID := range decisionScheduleIDs {
 		transferTasks = append(transferTasks, &persistence.DecisionTask{
+			WorkflowIdentifier: persistence.WorkflowIdentifier{
+				DomainID:   updatedInfo.DomainID,
+				WorkflowID: updatedInfo.WorkflowID,
+				RunID:      updatedInfo.RunID,
+			},
 			TaskData: persistence.TaskData{
 				TaskID: s.GetNextSequenceNumber(),
 			},
-			DomainID:   updatedInfo.DomainID,
-			TaskList:   updatedInfo.TaskList,
-			ScheduleID: int64(decisionScheduleID)})
+			TargetDomainID: updatedInfo.DomainID,
+			TaskList:       updatedInfo.TaskList,
+			ScheduleID:     int64(decisionScheduleID)})
 	}
 
 	for _, activityScheduleID := range activityScheduleIDs {
 		transferTasks = append(transferTasks, &persistence.ActivityTask{
+			WorkflowIdentifier: persistence.WorkflowIdentifier{
+				DomainID:   updatedInfo.DomainID,
+				WorkflowID: updatedInfo.WorkflowID,
+				RunID:      updatedInfo.RunID,
+			},
 			TaskData: persistence.TaskData{
 				TaskID: s.GetNextSequenceNumber(),
 			},
-			DomainID:   updatedInfo.DomainID,
-			TaskList:   updatedInfo.TaskList,
-			ScheduleID: int64(activityScheduleID)})
+			TargetDomainID: updatedInfo.DomainID,
+			TaskList:       updatedInfo.TaskList,
+			ScheduleID:     int64(activityScheduleID)})
 	}
 	_, err := s.ExecutionManager.UpdateWorkflowExecution(ctx, &persistence.UpdateWorkflowExecutionRequest{
 		RangeID: rangeID,
