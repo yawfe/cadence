@@ -49,6 +49,7 @@ import (
 const (
 	defaultRemoteCallTimeout = 30 * time.Second
 	checksumErrorRetryCount  = 3
+	maxLockDuration          = 1 * time.Second
 )
 
 type conflictError struct {
@@ -174,9 +175,11 @@ type (
 		logger            log.Logger
 		metricsClient     metrics.Client
 
-		mutex        locks.Mutex
-		mutableState MutableState
-		stats        *persistence.ExecutionStats
+		mutex           locks.Mutex
+		lockTime        time.Time
+		maxLockDuration time.Duration
+		mutableState    MutableState
+		stats           *persistence.ExecutionStats
 
 		appendHistoryNodesFn                  func(context.Context, string, types.WorkflowExecution, *persistence.AppendHistoryNodesRequest) (*persistence.AppendHistoryNodesResponse, error)
 		persistStartWorkflowBatchEventsFn     func(context.Context, *persistence.WorkflowEvents) (events.PersistedBlob, error)
@@ -218,6 +221,7 @@ func NewContext(
 		logger:            logger,
 		metricsClient:     shard.GetMetricsClient(),
 		mutex:             locks.NewMutex(),
+		maxLockDuration:   maxLockDuration,
 		stats: &persistence.ExecutionStats{
 			HistorySize: 0,
 		},
@@ -265,11 +269,26 @@ func NewContext(
 }
 
 func (c *contextImpl) Lock(ctx context.Context) error {
-	return c.mutex.Lock(ctx)
+	err := c.mutex.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	c.lockTime = time.Now()
+	return nil
 }
 
 func (c *contextImpl) Unlock() {
-	c.mutex.Unlock()
+	defer c.mutex.Unlock()
+
+	if c.lockTime.IsZero() { // skip logging if the lock is never acquired
+		return
+	}
+	elapsed := time.Since(c.lockTime)
+	c.metricsClient.RecordTimer(metrics.WorkflowContextScope, metrics.WorkflowContextLockLatency, elapsed)
+	if elapsed > c.maxLockDuration {
+		c.maxLockDuration = elapsed
+		c.logger.Info("workflow context lock is released. this is logged only when it's longer than maxLockDuration", tag.WorkflowContextLockLatency(elapsed))
+	}
 }
 
 func (c *contextImpl) Clear() {
