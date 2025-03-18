@@ -129,6 +129,7 @@ type (
 		CompleteTimerTask(ctx context.Context, request *CompleteTimerTaskRequest) error
 
 		// History task related methods
+		GetHistoryTasks(ctx context.Context, request *GetHistoryTasksRequest) (*GetHistoryTasksResponse, error)
 		RangeCompleteHistoryTask(ctx context.Context, request *RangeCompleteHistoryTaskRequest) (*RangeCompleteHistoryTaskResponse, error)
 
 		// Scan related methods
@@ -1001,5 +1002,51 @@ func NewDataBlobFromInternal(blob *types.DataBlob) *DataBlob {
 		}
 	default:
 		panic(fmt.Sprintf("NewDataBlobFromInternal with unsupported encoding type: %v", blob.GetEncodingType()))
+	}
+}
+
+func (t *InternalReplicationTaskInfo) ToTask() (Task, error) {
+	switch t.TaskType {
+	case ReplicationTaskTypeHistory:
+		return &HistoryReplicationTask{
+			WorkflowIdentifier: WorkflowIdentifier{
+				DomainID:   t.DomainID,
+				WorkflowID: t.WorkflowID,
+				RunID:      t.RunID,
+			},
+			TaskData: TaskData{
+				Version:             t.Version,
+				TaskID:              t.TaskID,
+				VisibilityTimestamp: t.CreationTime,
+			},
+			FirstEventID:      t.FirstEventID,
+			NextEventID:       t.NextEventID,
+			BranchToken:       t.BranchToken,
+			NewRunBranchToken: t.NewRunBranchToken,
+		}, nil
+	case ReplicationTaskTypeSyncActivity:
+		return &SyncActivityTask{
+			WorkflowIdentifier: WorkflowIdentifier{
+				DomainID:   t.DomainID,
+				WorkflowID: t.WorkflowID,
+				RunID:      t.RunID,
+			},
+			TaskData: TaskData{
+				Version:             t.Version,
+				TaskID:              t.TaskID,
+				VisibilityTimestamp: t.CreationTime,
+			},
+			ScheduledID: t.ScheduledID,
+		}, nil
+	case ReplicationTaskTypeFailoverMarker:
+		return &FailoverMarkerTask{
+			TaskData: TaskData{
+				Version: t.Version,
+				TaskID:  t.TaskID,
+			},
+			DomainID: t.DomainID,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown task type: %d", t.TaskType)
 	}
 }
