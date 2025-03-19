@@ -2830,6 +2830,13 @@ const (
 	// Allowed filters: N/A
 	PinotOptimizedQueryColumns
 
+	// SearchAttributesHiddenValueKeys is the list of search attributes that values should be hidden
+	// KeyName: frontend.searchAttributesHiddenValueKeys
+	// Value type: Map
+	// Default value: empty map
+	// Allowed filters: N/A
+	SearchAttributesHiddenValueKeys
+
 	// LastMapKey must be the last one in this const group
 	LastMapKey
 )
@@ -5121,6 +5128,11 @@ var MapKeys = map[MapKey]DynamicMap{
 	PinotOptimizedQueryColumns: {
 		KeyName:      "frontend.pinotOptimizedQueryColumns",
 		Description:  "PinotOptimizedQueryColumns is the list of search attributes that can be used in pinot optimized query",
+		DefaultValue: map[string]interface{}{},
+	},
+	SearchAttributesHiddenValueKeys: {
+		KeyName:      "frontend.searchAttributesHiddenValueKeys",
+		Description:  "SearchAttributesHiddenValueKeys is the list of search attributes that values should be hidden",
 		DefaultValue: map[string]interface{}{},
 	},
 }
