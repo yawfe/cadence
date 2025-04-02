@@ -105,6 +105,7 @@ type Impl struct {
 	// membership infos
 
 	membershipResolver membership.Resolver
+	hashRings          map[string]membership.Ring
 
 	// internal services clients
 
