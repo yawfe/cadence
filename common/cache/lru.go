@@ -37,6 +37,9 @@ import (
 var (
 	// ErrCacheFull is returned if Put fails due to cache being filled with pinned elements
 	ErrCacheFull = errors.New("Cache capacity is fully occupied with pinned elements")
+
+	// ErrEntryTooBig is returned if the entry is too big to be cached
+	ErrEntryTooBig = errors.New("Entry is too big to be cached")
 )
 
 // upper limit to prevent infinite growing
@@ -59,7 +62,7 @@ type (
 		maxSize       dynamicproperties.IntPropertyFn
 		currSize      uint64
 		sizeByKey     map[interface{}]uint64
-		isSizeBased   bool
+		isSizeBased   dynamicproperties.BoolPropertyFn
 		activelyEvict bool
 		// We use this instead of time.Now() in order to make testing easier
 		timeSource   clock.TimeSource
@@ -150,9 +153,9 @@ func (entry *entryImpl) CreateTime() time.Time {
 
 // New creates a new cache with the given options
 func New(opts *Options) Cache {
-	if opts == nil || (opts.MaxCount <= 0 && (opts.MaxSize() <= 0 || opts.GetCacheItemSizeFunc == nil)) {
+	if opts == nil || (opts.MaxCount <= 0 && opts.MaxSize() <= 0) {
 		panic("Either MaxCount (count based) or " +
-			"MaxSize and GetCacheItemSizeFunc (size based) options must be provided for the LRU cache")
+			"MaxSize must be provided for the LRU cache")
 	}
 
 	timeSource := opts.TimeSource
@@ -181,26 +184,24 @@ func New(opts *Options) Cache {
 		cache.metricsScope = metrics.NoopScope(1)
 	}
 
-	if cache.isSizeBased {
-		cache.sizeFunc = opts.GetCacheItemSizeFunc
-		cache.maxSize = opts.MaxSize
-		if cache.maxSize == nil {
-			// If maxSize is not defined for size-based cache, set default to cacheCountLimit
-			cache.maxSize = dynamicproperties.GetIntPropertyFn(cacheDefaultSizeLimit)
-		}
-		cache.sizeByKey = make(map[interface{}]uint64, opts.InitialCapacity)
+	if opts.IsSizeBased == nil {
+		cache.isSizeBased = dynamicproperties.GetBoolPropertyFn(false)
 	} else {
-		// cache is count based if max size and sizeFunc are not provided
-		cache.maxCount = opts.MaxCount
-		cache.maxSize = dynamicproperties.GetIntPropertyFn(0)
-		cache.sizeFunc = func(interface{}) uint64 {
-			return 0
-		}
+		cache.isSizeBased = opts.IsSizeBased
 	}
+
+	cache.sizeFunc = opts.GetCacheItemSizeFunc
+	cache.maxSize = opts.MaxSize
+	if cache.maxSize == nil {
+		// If maxSize is not defined for size-based cache, set default to cacheCountLimit
+		cache.maxSize = dynamicproperties.GetIntPropertyFn(cacheDefaultSizeLimit)
+	}
+	cache.sizeByKey = make(map[interface{}]uint64, opts.InitialCapacity)
+	cache.maxCount = opts.MaxCount
 
 	cache.logger.Info("LRU cache initialized",
 		tag.Value(map[string]interface{}{
-			"isSizeBased": cache.isSizeBased,
+			"isSizeBased": cache.isSizeBased(),
 			"maxCount":    cache.maxCount,
 			"maxSize":     cache.maxSize(),
 		}),
@@ -318,16 +319,17 @@ func (c *lru) evictExpiredItems() {
 // Put puts a new value associated with a given key, returning the existing value (if present)
 // allowUpdate flag is used to control overwrite behavior if the value exists
 func (c *lru) putInternal(key interface{}, value interface{}, allowUpdate bool) (interface{}, error) {
-	valueSize := uint64(0)
-	if c.isSizeBased {
-		sizeableValue, ok := value.(Sizeable)
-		if !ok {
-			return nil, fmt.Errorf("value %T does not implement sizable. Key: %+v", value, key)
-		}
-		valueSize = sizeableValue.ByteSize()
-	}
+	valueSize := uint64(1)
+	sizeableValue, ok := value.(Sizeable)
+
 	c.mut.Lock()
 	defer c.mut.Unlock()
+
+	if !ok {
+		c.logger.Warn(fmt.Sprintf("Cache is strictly count-based because value %T does not implement sizable", value))
+	} else {
+		valueSize = sizeableValue.ByteSize()
+	}
 
 	c.evictExpiredItems()
 
@@ -338,21 +340,28 @@ func (c *lru) putInternal(key interface{}, value interface{}, allowUpdate bool) 
 			// Entry has expired
 			c.deleteInternal(element)
 		} else {
+			// replace the value
 			existing := entry.value
 			if allowUpdate {
-				if c.isSizeBased {
-					for c.isCacheFull() {
-						oldest := c.byAccess.Back().Value.(*entryImpl)
-						if oldest.refCount > 0 {
-							// Cache is full with pinned elements
-							// we don't update
-							return existing, ErrCacheFull
+				for c.isCacheFull() {
+					// Find the oldest unpinned item to evict
+					oldest := c.byAccess.Back()
+					for oldest != nil {
+						entry := oldest.Value.(*entryImpl)
+						if entry.refCount == 0 {
+							// Found an unpinned item, evict it
+							c.deleteInternal(oldest)
+							break
 						}
-						c.deleteInternal(c.byAccess.Back())
+						oldest = oldest.Prev()
 					}
-					c.updateSizeOnDelete(key)
-					c.updateSizeOnAdd(key, valueSize)
+					if oldest == nil {
+						// All items are pinned, can't evict anything
+						return existing, ErrCacheFull
+					}
 				}
+				c.updateSizeOnDelete(key)
+				c.updateSizeOnAdd(key, valueSize)
 				entry.value = value
 				if c.ttl != 0 {
 					entry.createTime = c.timeSource.Now()
@@ -367,6 +376,7 @@ func (c *lru) putInternal(key interface{}, value interface{}, allowUpdate bool) 
 		}
 	}
 
+	// add the value if possible
 	entry := &entryImpl{
 		key:   key,
 		value: value,
@@ -380,19 +390,56 @@ func (c *lru) putInternal(key interface{}, value interface{}, allowUpdate bool) 
 		entry.createTime = c.timeSource.Now()
 	}
 
-	c.byKey[key] = c.byAccess.PushFront(entry)
-	c.updateSizeOnAdd(key, valueSize)
-	for c.isCacheFull() {
-		oldest := c.byAccess.Back().Value.(*entryImpl)
-
-		if oldest.refCount > 0 {
-			// Cache is full with pinned elements
-			// revert the insert and return
-			c.deleteInternal(c.byAccess.Front())
-			return nil, ErrCacheFull
+	// ensuring that the cache has at least one spot for the new entry
+	// different logic between count and size approach
+	if c.isSizeBased() {
+		if valueSize > uint64(c.maxSize()) {
+			// value is too big to be cached, we also don't want to evict everyone else
+			// TODO: we should handle this logic in the caller
+			return nil, ErrEntryTooBig
 		}
+		c.byKey[key] = c.byAccess.PushFront(entry)
+		c.updateSizeOnAdd(key, valueSize)
+		for c.isCacheFull() {
+			// Find the oldest unpinned item to evict
+			oldest := c.byAccess.Back()
+			for oldest != nil {
+				entry := oldest.Value.(*entryImpl)
+				if entry.refCount == 0 {
+					// Found an unpinned item, evict it
+					c.deleteInternal(oldest)
+					break
+				}
+				oldest = oldest.Prev()
+			}
+			if oldest == nil {
+				// All items are pinned, can't evict anything
+				c.deleteInternal(c.byAccess.Front())
+				return nil, ErrCacheFull
+			}
+		}
+	} else {
+		c.byKey[key] = c.byAccess.PushFront(entry)
+		c.updateSizeOnAdd(key, valueSize)
 
-		c.deleteInternal(c.byAccess.Back())
+		for c.isCacheFull() {
+			// Find the oldest unpinned item to evict
+			oldest := c.byAccess.Back()
+			for oldest != nil {
+				entry := oldest.Value.(*entryImpl)
+				if entry.refCount <= 0 {
+					// Found an unpinned item, evict it
+					c.deleteInternal(oldest)
+					break
+				}
+				oldest = oldest.Prev()
+			}
+			if oldest == nil {
+				// All items are pinned, can't evict anything
+				c.deleteInternal(c.byAccess.Front())
+				return nil, ErrCacheFull
+			}
+		}
 	}
 	return nil, nil
 }
@@ -412,30 +459,34 @@ func (c *lru) isEntryExpired(entry *entryImpl, currentTime time.Time) bool {
 
 func (c *lru) isCacheFull() bool {
 	count := len(c.byKey)
-	// if the value size is greater than maxSize(should never happen) then the item won't be cached
-	return (!c.isSizeBased && count == c.maxCount) || c.currSize > uint64(c.maxSize()) || count > cacheCountLimit
+	if c.isSizeBased() {
+		if c.maxSize() == 0 {
+			// we don't want to stop caching if maxSize is misconfigured to 0, we will use cacheDefaultSizeLimit instead
+			// BUT we need to warn users for this config
+			c.logger.Error(fmt.Sprintf("Cache size is misconfigured to 0 for value type %T, please fix config", c.byKey[0].Value.(*entryImpl).value))
+			return c.currSize > uint64(cacheDefaultSizeLimit) || count > cacheCountLimit
+		}
+		return c.currSize > uint64(c.maxSize()) || count > cacheCountLimit
+	}
+	return count > c.maxCount || count > cacheCountLimit
 }
 
 func (c *lru) updateSizeOnAdd(key interface{}, valueSize uint64) {
-	if c.isSizeBased {
-		c.sizeByKey[key] = valueSize
-		// the int overflow should not happen here
-		c.currSize += uint64(valueSize)
-		c.emitSizeOnUpdate()
-	}
+	c.sizeByKey[key] = valueSize
+	// the int overflow should not happen here
+	c.currSize += uint64(valueSize)
+	c.emitSizeOnUpdate()
+
 }
 
 func (c *lru) updateSizeOnDelete(key interface{}) {
-	if c.isSizeBased {
-		c.currSize -= uint64(c.sizeByKey[key])
-		c.emitSizeOnUpdate()
-		delete(c.sizeByKey, key)
-	}
+	c.currSize -= uint64(c.sizeByKey[key])
+	c.emitSizeOnUpdate()
+	delete(c.sizeByKey, key)
 }
 
 func (c *lru) emitSizeOnUpdate() {
-	if c.isSizeBased {
-		c.metricsScope.UpdateGauge(metrics.BaseCacheByteSize, float64(c.currSize))
-		c.metricsScope.UpdateGauge(metrics.BaseCacheByteSizeLimitGauge, float64(c.maxSize()))
-	}
+	c.metricsScope.UpdateGauge(metrics.BaseCacheByteSize, float64(c.currSize))
+	c.metricsScope.UpdateGauge(metrics.BaseCacheByteSizeLimitGauge, float64(c.maxSize()))
+
 }
