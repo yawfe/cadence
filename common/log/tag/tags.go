@@ -52,6 +52,11 @@ func ActiveClusterName(activeClusterName string) Tag {
 	return newStringTag("active-cluster-name", activeClusterName)
 }
 
+// ActiveClusterChangeType returns tag for ActiveClusterChangeType.
+func ActiveClusterChangeType(changeType string) Tag {
+	return newStringTag("active-active-change-type", changeType)
+}
+
 // Timestamp returns tag for Timestamp
 func Timestamp(timestamp time.Time) Tag {
 	return newTimeTag("timestamp", timestamp)
