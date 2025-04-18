@@ -172,6 +172,9 @@ func (t *timerQueueProcessor) Start() {
 		return
 	}
 
+	t.logger.Info("Starting timer queue processor")
+	defer t.logger.Info("Timer queue processor started")
+
 	t.activeQueueProcessor.Start()
 	for _, standbyQueueProcessor := range t.standbyQueueProcessors {
 		standbyQueueProcessor.Start()
@@ -185,6 +188,9 @@ func (t *timerQueueProcessor) Stop() {
 	if !atomic.CompareAndSwapInt32(&t.status, common.DaemonStatusStarted, common.DaemonStatusStopped) {
 		return
 	}
+
+	t.logger.Info("Stopping timer queue processor")
+	defer t.logger.Info("Timer queue processor stopped")
 
 	if !t.shard.GetConfig().QueueProcessorEnableGracefulSyncShutdown() {
 		t.activeQueueProcessor.Stop()
@@ -380,10 +386,12 @@ func (t *timerQueueProcessor) HandleAction(ctx context.Context, clusterName stri
 }
 
 func (t *timerQueueProcessor) LockTaskProcessing() {
+	t.logger.Info("Timer queue processor locking task processing")
 	t.taskAllocator.Lock()
 }
 
 func (t *timerQueueProcessor) UnlockTaskProcessing() {
+	t.logger.Info("Timer queue processor unlocking task processing")
 	t.taskAllocator.Unlock()
 }
 
@@ -404,6 +412,9 @@ func (t *timerQueueProcessor) drain() {
 }
 
 func (t *timerQueueProcessor) completeTimerLoop() {
+	t.logger.Info("Timer queue processor completeTimerLoop")
+	defer t.logger.Info("Timer queue processor completeTimerLoop completed")
+
 	defer t.shutdownWG.Done()
 
 	completeTimer := time.NewTimer(t.config.TimerProcessorCompleteTimerInterval())
@@ -428,7 +439,7 @@ func (t *timerQueueProcessor) completeTimerLoop() {
 					break
 				}
 
-				t.logger.Error("Failed to complete timer task", tag.Error(err))
+				t.logger.Error("Failed to complete timer task", tag.Error(err), tag.Attempt(int32(attempt)))
 				var errShardClosed *shard.ErrShardClosed
 				if errors.As(err, &errShardClosed) {
 					if !t.shard.GetConfig().QueueProcessorEnableGracefulSyncShutdown() {
