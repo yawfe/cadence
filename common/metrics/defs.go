@@ -2275,6 +2275,7 @@ const (
 
 	DomainReplicationQueueSizeGauge
 	DomainReplicationQueueSizeErrorCount
+	DomainCacheUpdateLatency
 
 	ParentClosePolicyProcessorSuccess
 	ParentClosePolicyProcessorFailures
@@ -3022,6 +3023,7 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		CadenceShardFailureGauge:             {metricName: "cadence_shard_failure", metricType: Gauge},
 		DomainReplicationQueueSizeGauge:      {metricName: "domain_replication_queue_size", metricType: Gauge},
 		DomainReplicationQueueSizeErrorCount: {metricName: "domain_replication_queue_failed", metricType: Counter},
+		DomainCacheUpdateLatency:             {metricName: "domain_cache_update_latency", metricType: Histogram, buckets: DomainCacheUpdateBuckets},
 		ParentClosePolicyProcessorSuccess:    {metricName: "parent_close_policy_processor_requests", metricType: Counter},
 		ParentClosePolicyProcessorFailures:   {metricName: "parent_close_policy_processor_errors", metricType: Counter},
 
@@ -3616,6 +3618,12 @@ var GlobalRatelimiterUsageHistogram = append(
 
 // ResponseRowSizeBuckets contains buckets for tracking how many rows are returned per persistence operation
 var ResponseRowSizeBuckets = append(
+	tally.ValueBuckets{0},                              // need an explicit 0 or zero is reported as 1
+	tally.MustMakeExponentialValueBuckets(1, 2, 17)..., // 1..65536
+)
+
+// DomainCacheUpdateBuckets contain metric results for domain update operations
+var DomainCacheUpdateBuckets = append(
 	tally.ValueBuckets{0},                              // need an explicit 0 or zero is reported as 1
 	tally.MustMakeExponentialValueBuckets(1, 2, 17)..., // 1..65536
 )
