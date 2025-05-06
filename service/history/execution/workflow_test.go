@@ -509,10 +509,15 @@ func (s *workflowSuite) newTestActiveClusterManager(clusterMetadata cluster.Meta
 	}
 
 	// Create and return the active cluster manager
-	return activecluster.NewManager(
+	activeClusterMgr, err := activecluster.NewManager(
 		domainIDToDomainFn,
 		clusterMetadata,
 		nil,
 		testlogger.New(s.T()),
+		nil,
 	)
+	if err != nil {
+		s.T().Fatalf("failed to create active cluster manager, error: %v", err)
+	}
+	return activeClusterMgr
 }
