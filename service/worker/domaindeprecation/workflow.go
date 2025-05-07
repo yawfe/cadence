@@ -34,8 +34,8 @@ import (
 )
 
 const (
-	domainDeprecationWorkflowTypeName = "domain-deprecation-workflow"
-	domainDeprecationTaskListName     = "domain-deprecation-tasklist"
+	DomainDeprecationWorkflowTypeName = "domain-deprecation-workflow"
+	DomainDeprecationTaskListName     = "domain-deprecation-tasklist"
 	domainDeprecationBatchPrefix      = "domain-deprecation-batch"
 
 	disableArchivalActivity    = "disableArchival"
@@ -73,19 +73,15 @@ var (
 )
 
 // DomainDeprecationWorkflow is the workflow that handles domain deprecation process
-func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domainName string) error {
+func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, params DomainDeprecationParams) error {
 	logger := workflow.GetLogger(ctx)
-	logger.Info("Starting domain deprecation workflow", zap.String("domain", domainName))
-
-	domainParams := DomainActivityParams{
-		DomainName: domainName,
-	}
+	logger.Info("Starting domain deprecation workflow", zap.String("domain", params.DomainName))
 
 	// Step 1: Activity disables archival
 	err := workflow.ExecuteActivity(
 		workflow.WithActivityOptions(ctx, activityOptions),
 		w.DisableArchivalActivity,
-		domainParams,
+		params,
 	).Get(ctx, nil)
 	if err != nil {
 		return err
@@ -95,7 +91,7 @@ func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domai
 	err = workflow.ExecuteActivity(
 		workflow.WithActivityOptions(ctx, activityOptions),
 		w.DeprecateDomainActivity,
-		domainParams,
+		params,
 	).Get(ctx, nil)
 	if err != nil {
 		return err
@@ -103,7 +99,7 @@ func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domai
 
 	// Step 3: Start child batch workflow to terminate open workflows of a domain
 	batchParams := batcher.BatchParams{
-		DomainName: domainName,
+		DomainName: params.DomainName,
 		Query:      "CloseTime = missing",
 		Reason:     "domain is deprecated",
 		BatchType:  batcher.BatchTypeTerminate,
@@ -124,13 +120,13 @@ func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domai
 
 	for attempt := 1; attempt <= MaxBatchWorkflowAttempts; attempt++ {
 		logger.Info("Starting batch workflow",
-			zap.String("domain", domainName),
+			zap.String("domain", params.DomainName),
 			zap.Int("attempt", attempt),
 			zap.Int("max_attempts", MaxBatchWorkflowAttempts))
 
 		workflowID := uuid.New()
 		childWorkflowOptions := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-			WorkflowID:                   fmt.Sprintf("%s-%s-%s-%d", domainDeprecationBatchPrefix, domainName, workflowID, attempt),
+			WorkflowID:                   fmt.Sprintf("%s-%s-%s-%d", domainDeprecationBatchPrefix, params.DomainName, workflowID, attempt),
 			ExecutionStartToCloseTimeout: workflowStartToCloseTimeout,
 			TaskStartToCloseTimeout:      workflowTaskStartToCloseTimeout,
 		})
@@ -142,14 +138,17 @@ func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domai
 		}
 
 		// Wait for visibility storage to refresh
-		workflow.Sleep(ctx, VisibilityRefreshWaitTime)
+		err = workflow.Sleep(ctx, VisibilityRefreshWaitTime)
+		if err != nil {
+			return fmt.Errorf("workflow sleep failed on attempt %d: %v", attempt, err)
+		}
 
 		// Check if there are still open workflows
 		var hasOpenWorkflows bool
 		err = workflow.ExecuteActivity(
 			workflow.WithActivityOptions(ctx, activityOptions),
 			w.CheckOpenWorkflowsActivity,
-			domainParams,
+			params,
 		).Get(ctx, &hasOpenWorkflows)
 		if err != nil {
 			return fmt.Errorf("failed to check open workflows on attempt %d: %v", attempt, err)
@@ -157,7 +156,7 @@ func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domai
 
 		if !hasOpenWorkflows {
 			logger.Info("No open workflows found after batch workflow",
-				zap.String("domain", domainName),
+				zap.String("domain", params.DomainName),
 				zap.Int("attempt", attempt))
 			break
 		}
@@ -167,10 +166,10 @@ func (w *domainDeprecator) DomainDeprecationWorkflow(ctx workflow.Context, domai
 		}
 
 		logger.Info("Found open workflows after batch workflow, will retry",
-			zap.String("domain", domainName),
+			zap.String("domain", params.DomainName),
 			zap.Int("attempt", attempt))
 	}
 
-	logger.Info("Domain deprecation workflow completed successfully", zap.String("domain", domainName))
+	logger.Info("Domain deprecation workflow completed successfully", zap.String("domain", params.DomainName))
 	return nil
 }

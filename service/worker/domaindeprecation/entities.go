@@ -22,7 +22,8 @@
 
 package domaindeprecation
 
-// DomainActivityParams contains the domain name parameter used by domain-related activities.
-type DomainActivityParams struct {
-	DomainName string `json:"domain_name"`
+// DomainDeprecationParams contains the parameters required for domain deprecation workflow.
+type DomainDeprecationParams struct {
+	DomainName    string `json:"domain_name"`
+	SecurityToken string `json:"security_token"`
 }
