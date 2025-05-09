@@ -16,6 +16,7 @@ import (
 	gomock "go.uber.org/mock/gomock"
 
 	future "github.com/uber/cadence/common/future"
+	metrics "github.com/uber/cadence/common/metrics"
 	persistence "github.com/uber/cadence/common/persistence"
 	task "github.com/uber/cadence/common/task"
 	types "github.com/uber/cadence/common/types"
@@ -928,17 +929,18 @@ func (m *MockExecutor) EXPECT() *MockExecutorMockRecorder {
 }
 
 // Execute mocks base method.
-func (m *MockExecutor) Execute(task Task, shouldProcessTask bool) error {
+func (m *MockExecutor) Execute(task Task) (metrics.Scope, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Execute", task, shouldProcessTask)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "Execute", task)
+	ret0, _ := ret[0].(metrics.Scope)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Execute indicates an expected call of Execute.
-func (mr *MockExecutorMockRecorder) Execute(task, shouldProcessTask any) *gomock.Call {
+func (mr *MockExecutorMockRecorder) Execute(task any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*MockExecutor)(nil).Execute), task, shouldProcessTask)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*MockExecutor)(nil).Execute), task)
 }
 
 // Stop mocks base method.
