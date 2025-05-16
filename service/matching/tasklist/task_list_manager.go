@@ -254,7 +254,7 @@ func (c *taskListManagerImpl) Start() error {
 
 	if !c.taskListID.IsRoot() && c.taskListKind == types.TaskListKindNormal {
 		var info *persistence.TaskListInfo
-		err := c.throttleRetry.Do(context.Background(), func() error {
+		err := c.throttleRetry.Do(context.Background(), func(ctx context.Context) error {
 			var err error
 			info, err = c.db.GetTaskListInfo(c.taskListID.GetRoot())
 			return err
@@ -397,7 +397,7 @@ func (c *taskListManagerImpl) RefreshTaskListPartitionConfig(ctx context.Context
 	if config == nil {
 		// if config is nil, we'll reload it from database
 		var info *persistence.TaskListInfo
-		err := c.throttleRetry.Do(ctx, func() error {
+		err := c.throttleRetry.Do(ctx, func(ctx context.Context) error {
 			var err error
 			info, err = c.db.GetTaskListInfo(c.taskListID.GetRoot())
 			return err
@@ -453,7 +453,7 @@ func (c *taskListManagerImpl) updatePartitionConfig(ctx context.Context, newConf
 			return nil, nil, nil
 		}
 	}
-	err = c.throttleRetry.Do(ctx, func() error {
+	err = c.throttleRetry.Do(ctx, func(ctx context.Context) error {
 		return c.db.UpdateTaskListPartitionConfig(toPersistenceConfig(version+1, newConfig))
 	})
 	if err != nil {
@@ -805,7 +805,7 @@ func (c *taskListManagerImpl) executeWithRetry(
 	operation func() (interface{}, error),
 ) (result interface{}, err error) {
 
-	op := func() error {
+	op := func(ctx context.Context) error {
 		result, err = operation()
 		return err
 	}
