@@ -318,6 +318,8 @@ type (
 		SearchAttributes   map[string][]byte
 		PartitionConfig    map[string]string
 
+		ActiveClusterSelectionPolicy *DataBlob
+
 		// attributes which are not related to mutable state at all
 		HistorySize int64
 		IsCron      bool

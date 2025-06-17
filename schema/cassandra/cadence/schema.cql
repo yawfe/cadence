@@ -97,7 +97,7 @@ CREATE TYPE workflow_execution (
   memo                             map<text, blob>,
   partition_config                 map<text, text>,
   cron_overlap_policy              int, -- enum CronOverlapPolicy {Skip, BufferOne}
-  task_list_kind            int, -- enum TaskListKind {Normal, Sticky, Ephemeral},
+  task_list_kind                   int, -- enum TaskListKind {Normal, Sticky, Ephemeral},
   active_cluster_selection_policy blob, -- active cluster selection policy applicable to active-active domains
   active_cluster_selection_policy_encoding text, -- encoding for active_cluster_selection_policy
 );

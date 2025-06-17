@@ -478,5 +478,14 @@ var (
 		},
 		ExclusiveMaxReadLevel: &TaskKey,
 	}
+	ActiveClusterSelectionPolicyRegionSticky = types.ActiveClusterSelectionPolicy{
+		ActiveClusterSelectionStrategy: types.ActiveClusterSelectionStrategyRegionSticky.Ptr(),
+		StickyRegion:                   "region1",
+	}
+	ActiveClusterSelectionPolicyExternalEntity = types.ActiveClusterSelectionPolicy{
+		ActiveClusterSelectionStrategy: types.ActiveClusterSelectionStrategyExternalEntity.Ptr(),
+		ExternalEntityType:             "externalEntityType1",
+		ExternalEntityKey:              "externalEntityKey1",
+	}
 	CronOverlapPolicy = types.CronOverlapPolicySkipped
 )
