@@ -32,5 +32,3 @@ make fmt
 make lint
 
 verify_no_files_changed
-
-# TODO(bk-cleanup): Remove this file after fully migrated to github actions
