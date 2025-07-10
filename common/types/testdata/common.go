@@ -405,6 +405,7 @@ var (
 		TaskList:          &types.TaskList{Name: TaskListName, Kind: types.TaskListKindNormal.Ptr()},
 		PartitionConfig:   PartitionConfig,
 		IsCron:            true,
+		CronOverlapPolicy: &CronOverlapPolicy,
 	}
 	WorkflowExecutionInfoArray = []*types.WorkflowExecutionInfo{&WorkflowExecutionInfo}
 
