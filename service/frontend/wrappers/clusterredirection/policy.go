@@ -22,6 +22,7 @@ package clusterredirection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/uber/cadence/common/activecluster"
@@ -267,25 +268,27 @@ func (policy *selectedOrAllAPIsForwardingRedirectionPolicy) withRedirect(
 	policy.logger.Debugf("Calling API %q on target cluster:%q for domain:%q", apiName, targetDC, domainEntry.GetInfo().Name)
 	err := call(targetDC)
 
-	targetDC, ok := policy.isDomainNotActiveError(domainEntry, err)
+	var domainNotActiveErr *types.DomainNotActiveError
+	ok := errors.As(err, &domainNotActiveErr)
 	if !ok || !enableDomainNotActiveForwarding {
 		return err
 	}
-	return call(targetDC)
-}
 
-func (policy *selectedOrAllAPIsForwardingRedirectionPolicy) isDomainNotActiveError(domainEntry *cache.DomainCacheEntry, err error) (string, bool) {
-	domainNotActiveErr, ok := err.(*types.DomainNotActiveError)
-	if !ok {
-		return "", false
+	// TODO(active-active): emit a metric here including apiName, targetDC and newTargetDC tags
+	// This can only happen if there was a failover during the API call.
+	// Forward the request the the active cluster specified in the error
+	if domainNotActiveErr.ActiveCluster == "" {
+		policy.logger.Debugf("No active cluster specified in the error returned from cluster:%q for domain:%q, api: %q so skipping redirect", targetDC, domainEntry.GetInfo().Name, apiName)
+		return err
 	}
 
-	// TODO(active-active): handle active-active domain not active error which has multiple other active clusters
-	if domainEntry.GetReplicationConfig().IsActiveActive() {
-		return "", false
+	if domainNotActiveErr.ActiveCluster == targetDC {
+		policy.logger.Debugf("No need to redirect to new target cluster:%q for domain:%q, api: %q", targetDC, domainEntry.GetInfo().Name, apiName)
+		return err
 	}
 
-	return domainNotActiveErr.ActiveCluster, true
+	policy.logger.Debugf("Calling API %q on new target cluster:%q for domain:%q as indicated by response from cluster:%q", apiName, domainNotActiveErr.ActiveCluster, domainEntry.GetInfo().Name, targetDC)
+	return call(domainNotActiveErr.ActiveCluster)
 }
 
 // return two values: the target cluster name, and whether or not forwarding to the active cluster
