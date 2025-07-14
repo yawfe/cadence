@@ -254,8 +254,12 @@ func (m *managerImpl) LookupWorkflow(ctx context.Context, domainID, wfID, rID st
 	plcy, err := m.getClusterSelectionPolicy(ctx, domainID, wfID, rID)
 	if err != nil {
 		var notExistsErr *types.EntityNotExistsError
-		if errors.As(err, &notExistsErr) {
-			// Case 1.b: domain migrated from active-passive to active-active case
+		if !errors.As(err, &notExistsErr) {
+			return nil, err
+		}
+
+		// Case 1.b: domain migrated from active-passive to active-active case
+		if d.GetReplicationConfig().ActiveClusterName != "" {
 			m.logger.Debug("LookupWorkflow: domain migrated from active-passive to active-active case. returning ActiveClusterName from domain entry",
 				tag.WorkflowDomainID(domainID),
 				tag.WorkflowID(wfID),
@@ -268,7 +272,25 @@ func (m *managerImpl) LookupWorkflow(ctx context.Context, domainID, wfID, rID st
 			}, nil
 		}
 
-		return nil, err
+		// Case 1.c: workflow is retired. return current cluster and its failover version
+		region := m.clusterMetadata.GetCurrentRegion()
+		cluster, ok := d.GetReplicationConfig().ActiveClusters.ActiveClustersByRegion[region]
+		if !ok {
+			return nil, newRegionNotFoundForDomainError(region, domainID)
+		}
+
+		m.logger.Debug("LookupWorkflow: workflow is retired. returning region, cluster name and failover version",
+			tag.WorkflowDomainID(domainID),
+			tag.WorkflowID(wfID),
+			tag.WorkflowRunID(rID),
+			tag.Region(region),
+			tag.ActiveClusterName(cluster.ActiveClusterName),
+		)
+		return &LookupResult{
+			Region:          region,
+			ClusterName:     cluster.ActiveClusterName,
+			FailoverVersion: cluster.FailoverVersion,
+		}, nil
 	}
 
 	if plcy.GetStrategy() == types.ActiveClusterSelectionStrategyExternalEntity {
