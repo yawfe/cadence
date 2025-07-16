@@ -25,7 +25,8 @@ var (
 	}
 	_testLeaderElectionCfg = config.LeaderElection{
 		Process: config.LeaderProcess{
-			Period: 10 * time.Second,
+			Period:       10 * time.Second,
+			HeartbeatTTL: 10 * time.Second,
 		},
 	}
 )
@@ -210,4 +211,76 @@ func TestRebalance_NoActiveExecutors(t *testing.T) {
 	// Assert
 	// No panic should occur, and the lastAppliedRevision should not be updated because no work was done.
 	assert.Equal(t, int64(0), processor.lastAppliedRevision)
+}
+
+// TestCleanup_RemovesStaleExecutors verifies that executors with old heartbeats are deleted.
+func TestCleanup_RemovesStaleExecutors(t *testing.T) {
+	// Arrange
+	ctrl := gomock.NewController(t)
+
+	now := time.Now()
+
+	mockStore := store.NewMockShardStore(ctrl)
+	mockClock := clock.NewMockedTimeSourceAt(now)
+
+	// Configure a 30-second TTL for heartbeats.
+	cfg := config.LeaderElection{
+		Process: config.LeaderProcess{
+			HeartbeatTTL: 30 * time.Second,
+		},
+	}
+
+	factory := NewProcessorFactory(testlogger.New(t), mockClock, cfg)
+	processor := factory.CreateProcessor(_testNamespaceCfg, mockStore)
+
+	// Setup state with one active, one stale, and one very stale executor.
+	heartbeats := map[string]store.HeartbeatState{
+		"executor-active":     {LastHeartbeat: now.Unix() - 10},  // 10 seconds ago (fresh)
+		"executor-stale":      {LastHeartbeat: now.Unix() - 35},  // 35 seconds ago (stale)
+		"executor-very-stale": {LastHeartbeat: now.Unix() - 100}, // 100 seconds ago (stale)
+	}
+
+	mockStore.EXPECT().GetState(gomock.Any()).Return(heartbeats, nil, int64(200), nil)
+
+	// Expect DeleteExecutors to be called once with a slice of the two stale executors.
+	mockStore.EXPECT().DeleteExecutors(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, executorIDs []string) error {
+			assert.ElementsMatch(t, []string{"executor-stale", "executor-very-stale"}, executorIDs)
+			return nil
+		},
+	).Times(1)
+
+	// Act
+	// We call the internal cleanupStaleExecutors method directly for this unit test.
+	processor.(*namespaceProcessor).cleanupStaleExecutors(context.Background())
+}
+
+// TestCleanup_NoStaleExecutors verifies that no action is taken when all heartbeats are recent.
+func TestCleanup_NoStaleExecutors(t *testing.T) {
+	// Arrange
+	ctrl := gomock.NewController(t)
+	now := time.Now()
+
+	mockStore := store.NewMockShardStore(ctrl)
+	mockClock := clock.NewMockedTimeSourceAt(now)
+
+	cfg := config.LeaderElection{
+		Process: config.LeaderProcess{
+			HeartbeatTTL: 30 * time.Second,
+		},
+	}
+
+	factory := NewProcessorFactory(testlogger.New(t), mockClock, cfg)
+	processor := factory.CreateProcessor(_testNamespaceCfg, mockStore)
+
+	// Setup state where all executors have recent heartbeats.
+	heartbeats := map[string]store.HeartbeatState{
+		"executor-1": {LastHeartbeat: now.Unix() - 5},
+		"executor-2": {LastHeartbeat: now.Unix() - 15},
+	}
+
+	mockStore.EXPECT().GetState(gomock.Any()).Return(heartbeats, nil, int64(201), nil)
+
+	// Act
+	processor.(*namespaceProcessor).cleanupStaleExecutors(context.Background())
 }
