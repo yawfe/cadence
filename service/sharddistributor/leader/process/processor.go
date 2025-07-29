@@ -15,6 +15,7 @@ import (
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/service/sharddistributor/config"
 	"github.com/uber/cadence/service/sharddistributor/store"
 )
@@ -37,7 +38,7 @@ type Processor interface {
 type Factory interface {
 	// CreateProcessor creates a new processor, it takes the generic store
 	// and the election object which provides the transactional guard.
-	CreateProcessor(cfg config.Namespace, shardStore store.Store, election store.Election) Processor
+	CreateProcessor(cfg config.Namespace, storage store.Store, election store.Election) Processor
 }
 
 const (
@@ -280,7 +281,7 @@ func (p *namespaceProcessor) rebalanceShards(ctx context.Context) (err error) {
 
 	var activeExecutors []string
 	for id, state := range heartbeatStates {
-		if state.State == store.ExecutorStateActive {
+		if state.Status == types.ExecutorStatusACTIVE {
 			activeExecutors = append(activeExecutors, id)
 		}
 	}
@@ -305,7 +306,7 @@ func (p *namespaceProcessor) rebalanceShards(ctx context.Context) (err error) {
 	}
 
 	for executorID, state := range assignedStates {
-		isActive := heartbeatStates[executorID].State == store.ExecutorStateActive
+		isActive := heartbeatStates[executorID].Status == types.ExecutorStatusACTIVE
 		for shardID := range state.AssignedShards {
 			if _, ok := allShards[shardID]; ok {
 				delete(allShards, shardID)
@@ -338,19 +339,13 @@ func (p *namespaceProcessor) rebalanceShards(ctx context.Context) (err error) {
 
 	newState := make(map[string]store.AssignedState)
 	for executorID, shards := range currentAssignments {
-		assignedShardsMap := make(map[string]store.ShardAssignment)
+		assignedShardsMap := make(map[string]*types.ShardAssignment)
 		for _, shardID := range shards {
-			assignedShardsMap[shardID] = store.ShardAssignment{ShardID: shardID}
-		}
-		// Preserve reported state if it exists
-		reportedShards := make(map[string]store.ShardState)
-		if existing, ok := assignedStates[executorID]; ok {
-			reportedShards = existing.ReportedShards
+			assignedShardsMap[shardID] = &types.ShardAssignment{Status: types.AssignmentStatusREADY}
 		}
 		newState[executorID] = store.AssignedState{
-			ExecutorID:     executorID,
 			AssignedShards: assignedShardsMap,
-			ReportedShards: reportedShards,
+			LastUpdated:    p.timeSource.Now().Unix(),
 		}
 	}
 
